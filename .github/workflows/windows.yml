@@ -1,0 +1,63 @@
+name: Build pgAdmin4 Windows Installer
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: true
+        default: 'expl_tensor'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. Инициализация Visual Studio и установка нужных компонентов (ATL/MFC)
+      - name: Setup Visual Studio Components
+        uses: microsoft/setup-visual-studio@v1
+        with:
+          # Указываем ATL, так как он часто нужен для runtime-проектов C++
+          components: |
+            microsoft.visualstudio.component.atl
+            microsoft.visualstudio.component.vc.tools.x86.x64
+
+      # 2. Настройка MSBuild в PATH
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # 3. Подготовка окружения (Python/Node)
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          npm install -g yarn
+
+      # 4. Сборка фронтенда
+      - name: Build Frontend
+        working-directory: ./web
+        run: |
+          yarn install
+          yarn run bundle
+
+      # 5. Сборка Runtime (используя инициализированную среду VS)
+      - name: Build Runtime
+        working-directory: ./runtime
+        run: msbuild pgAdmin4.sln /p:Configuration=Release /p:Platform=x64
+
+      # 6. Создание инсталлятора (Build.bat запускает Inno Setup)
+      - name: Build Installer
+        working-directory: ./pkg/win32
+        run: |
+          # Перед запуском bat-файла убедитесь, что Inno Setup в PATH (обычно есть на runner)
+          ./build.bat
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgadmin4-installer
+          path: pkg/win32/output/*.exe
